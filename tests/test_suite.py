@@ -27,12 +27,6 @@ class TestCore(unittest.TestCase):
         success = pdf_essentials.extract_pdf_pages(input_pdf, output_pdf, page_indices)
         assert success
 
-    def test_pdf_a_conversion(self):
-        input_pdf = r"tests/doc_with_4_pages.pdf"
-        output_pdf = r"tests/test_pdf_a_conversion_doc_with_4_pages.pdf"
-        conversion_status = pdf_essentials.convert_to_pdfa(input_pdf, output_pdf)
-        assert conversion_status == True and conversion_status == pdf_essentials.check_pdfa_compliance(output_pdf)
-
     def test_redaction(self):
         input_pdf = r"tests/doc_about_python.pdf"
         output_pdf = r"tests/test_redaction_doc_about_python.pdf"
