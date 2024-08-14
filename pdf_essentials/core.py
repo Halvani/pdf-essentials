@@ -4,8 +4,9 @@ from pathlib import Path
 from enum import Enum, auto
 from typing import Union, Optional, List, Dict, Tuple
 
+import fitz  # PyMuPDF
 import pikepdf
-import fitz
+import ghostscript
 from PyPDF2 import PdfReader, PdfWriter, PdfMerger
 from PyPDF2.generic import NameObject, NumberObject
 from PyPDF2.errors import PdfReadError
@@ -715,3 +716,154 @@ def make_pdf_read_only(input_pdf_path: str, output_pdf_path: str, verbose: bool 
             print(f"An error occurred: {e}")
         return False
 
+def remove_images_and_add_placeholder(input_pdf: str,
+                                      output_pdf: str,
+                                      pages_with_images: Optional[List[int]] = None,
+                                      placeholder: str = "Image removed",
+                                      verbose: bool = True) -> bool:
+    """
+    Removes images from a PDF and replaces them with a given placeholder. Saves the result to a new PDF.
+
+    Args:
+        input_pdf (str): The path to the input PDF file.
+        output_pdf (str): The path to the output PDF file.
+        pages_with_images (List[int], optional): A list of page indices (1-based) where images should be removed.
+                                                 If not provided, images will be removed from all pages.
+        placeholder (str): The placeholder that should be inserted where the respective image has been deleted.                               
+        verbose (bool): If True, prints success/failure messages. Defaults to True.
+
+    Returns:
+        bool: True if the PDF was successfully written, False otherwise.
+    """
+    
+    try:
+        # Open the input PDF
+        pdf_document = fitz.open(input_pdf)
+
+        # Determine pages to process
+        if pages_with_images is None:
+            pages_to_process = range(len(pdf_document))  # All pages
+        else:
+            pages_to_process = [page - 1 for page in pages_with_images]  # Convert to 0-based index
+
+        # Process each specified page
+        for page_num in pages_to_process:
+            page = pdf_document.load_page(page_num)
+            image_list = page.get_images(full=True)
+
+            # Remove each image and replace it with a placeholder
+            for image in image_list:
+                xref = image[0]  # Image reference number
+                rect = page.get_image_rects(xref)[0]  # Get image position and size
+
+                # Remove the image from the document
+                pdf_document._deleteObject(xref)
+
+                # Draw a placeholder (a rectangle and some text)
+                page.draw_rect(rect, color=(1, 0, 0), width=2)  # Red rectangle placeholder
+                page.insert_text((rect.x0, rect.y1), placeholder, fontsize=20, color=(1, 0, 0))
+
+            if verbose:
+                if image_list:
+                    print(f"Images removed from page {page_num + 1}.")
+                else:
+                    print(f"No images found on page {page_num + 1}.")
+
+        # Save the modified PDF to the output file
+        pdf_document.save(output_pdf)
+
+        # Close the document
+        pdf_document.close()
+
+        if verbose:
+            print(f"Images successfully removed and placeholders added. Saved to '{output_pdf}'.")
+
+        return True
+
+    except Exception as e:
+        if verbose:
+            print(f"Failed to remove images from '{input_pdf}': {e}")
+        return False
+
+def check_pdfa_compliance(input_pdf: str) -> bool:
+    """
+    Check if a PDF is PDF/A compliant by inspecting its XMP metadata and PDF structure.
+
+    Args:
+        input_pdf (str): Path to the input PDF file.
+
+    Returns:
+        bool: True if the PDF is PDF/A compliant, False otherwise.
+    """
+    
+    try:
+        with pikepdf.open(input_pdf) as pdf:
+            # Check document's XMP metadata for PDF/A compliance
+            try:
+                xmp_metadata = pdf.open_metadata()
+                if xmp_metadata is not None:
+                    pdfa_part = xmp_metadata.get("pdfaid:part", None)
+                    pdfa_conformance = xmp_metadata.get("pdfaid:conformance", None)
+                    
+                    # If both keys are present, the PDF is likely PDF/A compliant
+                    if pdfa_part and pdfa_conformance:
+                        return True
+            except KeyError:
+                # If there's an issue reading XMP metadata, continue with other checks
+                pass
+
+            # PDF/A typically embeds an OutputIntent entry in the document's structure
+            # We check for /OutputIntent dictionaries, which are required in PDF/A files
+            if "/OutputIntent" in pdf.root:
+                output_intent = pdf.root["/OutputIntent"]
+                if isinstance(output_intent, pikepdf.Dictionary):
+                    return True
+                elif isinstance(output_intent, pikepdf.Array):
+                    if any("/GTS_PDFA1" in intent.get("/S", "") for intent in output_intent):
+                        return True
+
+        return False  # Return False if none of the checks confirm PDF/A compliance
+
+    except Exception as e:
+        print(f"An error occurred while checking PDF/A compliance: {e}")
+        return False
+    
+def convert_to_pdfa(input_pdf: str, output_pdf: str, verbose: bool = True) -> bool:
+    """
+    Converts a PDF to a PDF/A compliant format using Ghostscript.
+
+    Args:
+        input_pdf (str): Path to the input PDF file.
+        output_pdf (str): Path to the output PDF/A file.
+        verbose (bool): If True, prints success or failure messages. Defaults to True.
+
+    Returns:
+        bool: True if the PDF is successfully processed, False otherwise.
+    """
+    
+    try:
+        # Ghostscript command to convert PDF to PDF/A
+        args = [
+            "gs",  # Ghostscript command
+            "-dPDFA",  # Enable PDF/A mode
+            "-dBATCH",  # Exit after processing
+            "-dNOPAUSE",  # Do not prompt and pause after each page
+            "-dUseCIEColor",  # Ensure color accuracy
+            "-sDEVICE=pdfwrite",  # Set the output device
+            f"-sOutputFile={output_pdf}",  # Output PDF/A file path
+            "-dPDFACompatibilityPolicy=1",  # Ensure strict PDF/A compliance
+            input_pdf  # Input PDF file path
+        ]
+
+        # Run Ghostscript with the specified arguments
+        ghostscript.Ghostscript(*args)
+
+        if verbose:
+            print(f"PDF successfully converted to PDF/A and saved to '{output_pdf}'.")
+
+        return True
+
+    except Exception as e:
+        if verbose:
+            print(f"An error occurred while converting to PDF/A: {e}")
+        return False

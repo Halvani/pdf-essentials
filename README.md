@@ -34,6 +34,8 @@ PDF-Essentials offers both standard and advanced functions for processing PDF fi
 
 - **Form field protection**: take a PDF with filled form fields and make it read-only
 
+- **PDF/A Conversion/Validation**: convert PDF to PDF/A format (requires [ghostscript](https://ghostscript.com/releases/gsdnld.html)) or validate if a given PDF complies with PDF/A
+
 ## Limitations / Design Considerations:
 PDF-Essentials comes with several limitations:
 
