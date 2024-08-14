@@ -1,5 +1,6 @@
 fitz==0.0.1.dev2
+ghostscript==0.7
+matplotlib==3.8.3
 pikepdf==9.1.1
 PyPDF2==3.0.1
 reportlab==4.2.2
-webcolors==1.13
