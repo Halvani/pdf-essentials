@@ -1,18 +1,18 @@
+import os
 import io
-import re
+from pathlib import Path
 from enum import Enum, auto
-from typing import Union, Tuple
+from typing import Union, Optional, List, Dict, Tuple
 
 import pikepdf
 import fitz
-from PyPDF2 import PdfReader, PdfWriter
+from PyPDF2 import PdfReader, PdfWriter, PdfMerger
 from PyPDF2.generic import NameObject, NumberObject
 from PyPDF2.errors import PdfReadError
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
 
-import utils
-
+from .utils import convert_to_rgb
 
 class PageNumberPosition(Enum):
     """
@@ -107,256 +107,7 @@ def add_page_numbers(input_pdf_path: str,
             print(f"Failed to add page numbers: {e}")
         return False
 
-def remove_pdf_metadata(input_pdf_path: str, output_pdf_path: str, verbose: bool = True) -> bool:
-    """
-    Remove all metadata from a PDF file and save the modified content to a new PDF.
-
-    This function reads the content of an existing PDF file, removes any metadata
-    associated with it, and writes the content to a new PDF file. Metadata includes
-    information like the author, title, subject, and other document properties.
-
-    Args:
-        input_pdf_path (str): The path to the input PDF file from which metadata should be removed.
-        output_pdf_path (str): The path where the new PDF file without metadata will be saved.
-        verbose (bool): If True, print the success or failure of the operation. Defaults to True.
-
-    Returns:
-        bool: True if the PDF was saved successfully without metadata, False otherwise.
-
-    Example:
-        success = remove_pdf_metadata('input.pdf', 'output.pdf', verbose=True)
-        if success:
-            print("Metadata removed successfully.")
-        else:
-            print("Failed to remove metadata.")
-    """
-    
-    try:
-        with open(input_pdf_path, 'rb') as input_pdf_file:
-            pdf_reader = PdfReader(input_pdf_file)
-            pdf_writer = PdfWriter()
-
-            # Copy all pages to the writer object
-            for page in pdf_reader.pages:
-                pdf_writer.add_page(page)
-
-            # Remove metadata
-            pdf_writer.add_metadata({})
-
-            # Write the modified content to a new PDF
-            with open(output_pdf_path, 'wb') as output_pdf_file:
-                pdf_writer.write(output_pdf_file)
-
-        if verbose:
-            print(f"Metadata removed and saved to '{output_pdf_path}'.")
-        return True
-
-    except Exception as e:
-        if verbose:
-            print(f"Failed to remove metadata: {e}")
-        return False
-
-def rotate_pages(input_pdf_path: str,
-                 output_pdf_path: str,
-                 rotation_dict: dict[int, int],
-                 verbose: bool = True) -> bool:
-    """
-    Rotates specific pages in a PDF file based on a dictionary of page numbers and rotation angles.
-
-    This function reads a PDF file, rotates specific pages according to the given rotation angles,
-    and saves the modified PDF to a new file. The dictionary `rotation_dict` should map page numbers 
-    (starting from 1) to rotation angles (in degrees). Valid rotation angles are 90, 180, 270, -90, 
-    -180, and -270 degrees.
-
-    Args:
-        input_pdf_path (str): The path to the input PDF file that will have its pages rotated.
-        output_pdf_path (str): The path where the rotated PDF file will be saved.
-        rotation_dict (dict[int, int]): A dictionary mapping page numbers (1-based index) to rotation angles.
-        verbose (bool): If True, print the success or failure of the operation. Defaults to True.
-
-    Returns:
-        bool: True if the PDF was saved successfully with the rotated pages, False otherwise.
-
-    Raises:
-        ValueError: If an invalid rotation angle or a zero-based page index is provided in `rotation_dict`.
-
-    Example:
-        success = rotate_pages('input.pdf', 'output.pdf', {1: 90, 3: -90}, verbose=True)
-        # Rotates the first page by 90 degrees clockwise and the third page by 90 degrees counterclockwise,
-        # and saves the output to 'output.pdf'.
-    """
-
-    try:
-        # Validate rotation angles
-        valid_rotations = {90, 180, 270, -90, -180, -270}
-        for page_num, rotation in rotation_dict.items():
-            if page_num <= 0:
-                raise ValueError("Page numbers should be natural numbers (starting from 1). A zero index was provided.")
-
-            if rotation not in valid_rotations:
-                allowed_values = ", ".join([str(x) for x in valid_rotations])
-                raise ValueError(f"Invalid rotation angle: {rotation}. Allowed values are: {allowed_values}.")
-
-        # Read the input PDF
-        pdf_reader = PdfReader(input_pdf_path)
-        pdf_writer = PdfWriter()
-
-        # Iterate through each page and rotate if necessary
-        for i, page in enumerate(pdf_reader.pages, start=1):
-            if i in rotation_dict:
-                page.rotate(rotation_dict[i])
-            pdf_writer.add_page(page)
-
-        # Write the rotated PDF to the output file
-        with open(output_pdf_path, 'wb') as output_pdf:
-            pdf_writer.write(output_pdf)
-
-        if verbose:
-            print(f"Rotated PDF saved successfully to '{output_pdf_path}'.")
-        return True
-
-    except Exception as e:
-        if verbose:
-            print(f"Failed to save the rotated PDF: {e}")
-        return False
-
-def anonymize_and_rasterize_strings(
-    input_pdf_path: str,
-    output_pdf_path: str,
-    strings_to_anonymize: list[str],
-    overlay_color: Union[str, Tuple[int, int, int]] = (0, 0, 0),
-    match_whole_word: bool = True,
-    verbose: bool = True) -> bool:
-    """
-    Anonymize and rasterize specified strings (words/substrings) in a PDF by redacting them with a specified overlay color.
-
-    This function searches for specific words or phrases in a PDF file and redacts (obscures)
-    them with a solid color overlay. The overlay color can be specified in various formats,
-    and the function supports exact word matching.
-
-    Args:
-        input_pdf_path (str): The path to the input PDF file where words will be anonymized.
-        output_pdf_path (str): The path where the output PDF file with redactions will be saved.
-        strings_to_anonymize (list[str]): A list of words or phrases to be anonymized in the PDF.
-        overlay_color (Union[str, Tuple[int, int, int]]): The color to use for redaction, in RGB, hex, CMYK, HSL, or human-readable color name format.
-        match_whole_word (bool): If True, only exact word matches will be anonymized. Defaults to True.
-        verbose (bool): If True, prints a success message if the operation is successful.
-
-    Returns:
-        bool: True if the PDF was saved successfully with the redactions, False otherwise.
-
-    Example:
-        success = anonymize_and_rasterize_strings(
-            'input.pdf', 'output.pdf', ['confidential', 'secret'], overlay_color='red'
-        )
-        if success:
-            print("PDF redacted and saved successfully.")
-        else:
-            print("Failed to save the redacted PDF.")
-    """
-    try:
-        # Convert overlay color to RGB list
-        rgb_color = utils.convert_to_rgb(overlay_color)
-
-        # Open the PDF document
-        pdf_document = fitz.open(input_pdf_path)
-
-        for page_num in range(pdf_document.page_count):
-            page = pdf_document.load_page(page_num)
-
-            for word in strings_to_anonymize:
-                # Search for the string (word/substring)
-                text_instances = page.search_for(word)
-                final_instances = []
-
-                if match_whole_word:
-                    for inst in text_instances:
-                        # Extract text around the instance to check for whole word match
-                        rect = fitz.Rect(inst)
-                        extracted_text = page.get_text("text", clip=rect)
-
-                        # Check if the found text is exactly the word
-                        if extracted_text.strip() == word:
-                            final_instances.append(inst)
-                else:
-                    final_instances = text_instances
-
-                # Redact the text instances
-                for inst in final_instances:
-                    rect = fitz.Rect(inst)
-                    # Pass RGB color as a list to avoid immutability issues
-                    page.add_redact_annot(rect, fill=rgb_color)
-
-            # Apply all redactions
-            page.apply_redactions()
-
-        # Save the modified PDF
-        pdf_document.save(output_pdf_path)
-        pdf_document.close()
-
-        if verbose:
-            print(f"Redacted PDF saved to '{output_pdf_path}'.")
-        return True
-
-    except Exception as e:
-        if verbose:
-            print(f"An error occurred: {e}")
-        return False
-
-def delete_pdf_pages(input_pdf: str,
-                     output_pdf: str,
-                     page_numbers: list[int],
-                     verbose: bool = True) -> bool:
-    """
-    Deletes specified pages from a PDF file.
-
-    Args:
-        input_pdf: Path to the input PDF file.
-        output_pdf: Path to the output PDF file.
-        page_numbers: A list of page numbers to delete (starting from 1).
-        verbose: If True, prints a success message if the operation is successful.
-
-    Returns:
-        True if the output PDF was successfully written, False otherwise.
-    """
-
-    try:
-        with open(input_pdf, 'rb') as in_file:
-            reader = PdfReader(in_file)
-            writer = PdfWriter()
-
-            # Convert page numbers to 0-based indices
-            page_numbers = [num - 1 for num in page_numbers]
-            page_numbers.sort(reverse=True)
-
-            for page_num, page in enumerate(reader.pages):
-                if page_num not in page_numbers:
-                    writer.add_page(page)
-
-            with open(output_pdf, 'wb') as out_file:
-                writer.write(out_file)
-                if verbose:
-                    print("PDF pages deleted successfully.")
-            return True
-    except PdfReadError as e:
-        if verbose:
-            print(f"Error processing PDF: {e}")
-        return False
-    
-    except FileNotFoundError:
-        if verbose:
-            print(f"Input file not found: {input_pdf}")
-        return False
-    
-    except Exception as e:
-        if verbose:
-            print(f"Unexpected error occurred: {e}")
-        return False
-
-def extract_pdf_pages(input_pdf: str,
-                      output_pdf_path: str,
-                      page_indices: list[int],
-                      verbose:bool = True) -> bool:
+def extract_pdf_pages(input_pdf: str, output_pdf_path: str, page_indices: list[int], verbose:bool = True) -> bool:
     """
     Extracts specified pages from a PDF file and saves them to a new file.
 
@@ -404,10 +155,226 @@ def extract_pdf_pages(input_pdf: str,
             print(f"Unexpected error occurred: {e}")
         return False
 
-def rearrange_pdf(input_pdf_path: str,
-                  output_pdf_path: str,
-                  page_order: list[int],
-                  verbose: bool = True) -> bool:
+def split_pdf_by_page_ranges(pdf_path: str, page_ranges: List[Tuple[int, int]], output_folder: str, verbose: bool = True) -> bool:
+    """
+    Splits a PDF file into multiple parts based on the provided list of page ranges and saves the parts to the specified output folder.
+
+    Args:
+        pdf_path (str): The file path to the input PDF.
+        page_ranges (List[Tuple[int, int]]): A list of tuples, where each tuple specifies the start and end page (inclusive) of the range. 
+                                             Page offsets start at 1.
+        output_folder (str): The path to the folder where the output PDFs will be saved.
+        verbose (bool): If True, prints success or failure messages. Defaults to True.
+
+    Returns:
+        bool: True if all parts are successfully saved, False otherwise.
+
+    Raises:
+        FileNotFoundError: If the PDF file does not exist.
+        ValueError: If any page range is invalid or out of bounds.
+    """
+    
+    try:
+        # Ensure output folder exists
+        os.makedirs(output_folder, exist_ok=True)
+        
+        # Load the PDF file
+        if not os.path.exists(pdf_path):
+            raise FileNotFoundError(f"The PDF file does not exist: {pdf_path}")
+        
+        reader = PdfReader(pdf_path)
+        num_pages = len(reader.pages)
+        
+        for i, (start, end) in enumerate(page_ranges):
+            # Validate page range
+            if start < 1 or end > num_pages or start > end:
+                raise ValueError(f"Invalid page range: ({start}, {end})")
+            
+            writer = PdfWriter()
+            
+            # Add specified pages to the writer
+            for page_num in range(start - 1, end):
+                writer.add_page(reader.pages[page_num])
+            
+            # Save the split PDF part with a filename indicating the page range
+            filename = Path(pdf_path).stem
+            output_path = os.path.join(output_folder, f"{filename}_part_{i + 1}_pages_{start}-{end}.pdf")
+            with open(output_path, "wb") as output_pdf:
+                writer.write(output_pdf)
+            
+            # Check if the file was saved correctly
+            if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+                if verbose:
+                    print(f"Failed to save the file: {output_path}")
+                return False
+        
+        if verbose:
+            print("All PDF parts saved successfully.")
+        return True
+    
+    except (FileNotFoundError, ValueError, IOError) as e:
+        if verbose:
+            print(f"An error occurred: {e}")
+        return False
+
+def merge_pdfs(pdf_list: List[str], output_path: str, verbose: bool = True) -> bool:
+    """
+    Merges a list of PDF files into a single PDF file in the specified order.
+
+    Args:
+        pdf_list (List[str]): A list of file paths to the PDF files to be merged.
+        output_path (str): The file path where the merged PDF will be saved.
+        verbose (bool): If True, prints a success or failure message. Defaults to True.
+
+    Returns:
+        bool: True if the PDF was successfully merged and saved, False otherwise.
+    """
+    
+    try:
+        merger = PdfMerger()
+        
+        for pdf in pdf_list:
+            merger.append(pdf)
+        
+        # Write merged PDF to the output path
+        merger.write(output_path)
+        merger.close()
+
+        if verbose:
+            print(f"PDFs merged successfully into '{output_path}'.")
+        return True
+
+    except Exception as e:
+        if verbose:
+            print(f"An error occurred while merging the PDFs: {e}")
+        return False
+
+def delete_pdf_pages(input_pdf: str, output_pdf: str, page_numbers: List[int], verbose: bool = True) -> bool:
+    """
+    Deletes specified pages from a PDF file.
+
+    Args:
+        input_pdf: Path to the input PDF file.
+        output_pdf: Path to the output PDF file.
+        page_numbers: A list of page numbers to delete (starting from 1).
+        verbose: If True, prints a success message if the operation is successful.
+
+    Returns:
+        True if the output PDF was successfully written, False otherwise.
+    """
+
+    try:
+        with open(input_pdf, 'rb') as in_file:
+            reader = PdfReader(in_file)
+            writer = PdfWriter()
+
+            # Convert page numbers to 0-based indices
+            page_numbers = [num - 1 for num in page_numbers]
+            page_numbers.sort(reverse=True)
+
+            for page_num, page in enumerate(reader.pages):
+                if page_num not in page_numbers:
+                    writer.add_page(page)
+
+            with open(output_pdf, 'wb') as out_file:
+                writer.write(out_file)
+                if verbose:
+                    print("PDF pages deleted successfully.")
+            return True
+    except PdfReadError as e:
+        if verbose:
+            print(f"Error processing PDF: {e}")
+        return False
+    
+    except FileNotFoundError:
+        if verbose:
+            print(f"Input file not found: {input_pdf}")
+        return False
+    
+    except Exception as e:
+        if verbose:
+            print(f"Unexpected error occurred: {e}")
+        return False
+
+def rotate_pages(input_pdf_path: str,
+                 output_pdf_path: str,
+                 global_rotation: Optional[int] = None,
+                 page_rotation_dict: Optional[dict[int, int]] = None,
+                 verbose: bool = True) -> bool:
+    """
+    Rotates pages in a PDF file based on global or page-wise rotation setting(s).
+
+    This function reads a PDF file, rotates all pages according to a global rotation angle or rotates specific pages
+    according to individual rotation angles, and saves the modified PDF to a new file.
+
+    Args:
+        input_pdf_path (str): The path to the input PDF file that will have its pages rotated.
+        output_pdf_path (str): The path where the rotated PDF file will be saved.
+        global_rotation (Optional[int]): A global rotation angle to apply to all pages (in degrees). Valid angles are
+                                         90, 180, 270, -90, -180, and -270 degrees. If None, no global rotation is applied.
+        page_rotation_dict (Optional[Dict[int, int]]): A dictionary mapping page numbers (1-based index) to rotation angles.
+                                                       Individual page rotations override the global rotation. Valid angles
+                                                       are 90, 180, 270, -90, -180, and -270 degrees.
+        verbose (bool): If True, prints the success or failure of the operation. Defaults to True.
+
+    Returns:
+        bool: True if the PDF was saved successfully with the rotated pages, False otherwise.
+
+    Raises:
+        ValueError: If an invalid rotation angle or a zero-based page index is provided.
+
+    Example:
+        success = rotate_pages(
+            'input.pdf',
+            'output.pdf',
+            global_rotation=90,
+            page_rotation_dict={1: 180, 3: -90},
+            verbose=True
+        )
+        # Rotates all pages by 90 degrees clockwise unless overridden, where page 1 is rotated by 180 degrees
+        # and page 3 is rotated by 90 degrees counterclockwise, and saves the output to 'output.pdf'.
+    """
+
+    try:
+        # Validate rotation angles
+        valid_rotations = {90, 180, 270, -90, -180, -270}
+        if global_rotation and global_rotation not in valid_rotations:
+            allowed_values = ", ".join([str(x) for x in valid_rotations])
+            raise ValueError(f"Invalid global rotation angle: {global_rotation}. Allowed values are: {allowed_values}.")
+
+        if page_rotation_dict:
+            for page_num, rotation in page_rotation_dict.items():
+                if page_num <= 0:
+                    raise ValueError("Page numbers should be natural numbers (starting from 1). A zero index was provided.")
+                if rotation not in valid_rotations:
+                    allowed_values = ", ".join([str(x) for x in valid_rotations])
+                    raise ValueError(f"Invalid rotation angle for page {page_num}: {rotation}. Allowed values are: {allowed_values}.")
+
+        # Read the input PDF
+        pdf_reader = PdfReader(input_pdf_path)
+        pdf_writer = PdfWriter()
+
+        # Iterate through each page and apply the appropriate rotation
+        for i, page in enumerate(pdf_reader.pages, start=1):
+            rotation = page_rotation_dict.get(i, global_rotation)
+            if rotation is not None:
+                page.rotate(rotation)
+            pdf_writer.add_page(page)
+
+        # Write the rotated PDF to the output file
+        with open(output_pdf_path, 'wb') as output_pdf:
+            pdf_writer.write(output_pdf)
+
+        if verbose:
+            print(f"Rotated PDF saved successfully to '{output_pdf_path}'.")
+        return True
+
+    except Exception as e:
+        if verbose:
+            print(f"Failed to save the rotated PDF: {e}")
+        return False
+
+def rearrange_pdf(input_pdf_path: str, output_pdf_path: str, page_order: List[int], verbose: bool = True) -> bool:
     """
     Rearranges pages in a PDF file according to a specified order.
 
@@ -466,6 +433,200 @@ def rearrange_pdf(input_pdf_path: str,
             print(f"Unexpected error occurred: {e}")
         return False
 
+def remove_pdf_metadata(input_pdf_path: str, output_pdf_path: str, verbose: bool = True) -> bool:
+    """
+    Remove all metadata from a PDF file and save the modified content to a new PDF.
+
+    This function reads the content of an existing PDF file, removes any metadata
+    associated with it, and writes the content to a new PDF file. Metadata includes
+    information like the author, title, subject, and other document properties.
+
+    Args:
+        input_pdf_path (str): The path to the input PDF file from which metadata should be removed.
+        output_pdf_path (str): The path where the new PDF file without metadata will be saved.
+        verbose (bool): If True, print the success or failure of the operation. Defaults to True.
+
+    Returns:
+        bool: True if the PDF was saved successfully without metadata, False otherwise.
+
+    Example:
+        success = remove_pdf_metadata('input.pdf', 'output.pdf', verbose=True)
+        if success:
+            print("Metadata removed successfully.")
+        else:
+            print("Failed to remove metadata.")
+    """
+    
+    try:
+        with open(input_pdf_path, 'rb') as input_pdf_file:
+            pdf_reader = PdfReader(input_pdf_file)
+            pdf_writer = PdfWriter()
+
+            # Copy all pages to the writer object
+            for page in pdf_reader.pages:
+                pdf_writer.add_page(page)
+
+            # Remove metadata
+            pdf_writer.add_metadata({})
+
+            # Write the modified content to a new PDF
+            with open(output_pdf_path, 'wb') as output_pdf_file:
+                pdf_writer.write(output_pdf_file)
+
+        if verbose:
+            print(f"Metadata removed and saved to '{output_pdf_path}'.")
+        return True
+
+    except Exception as e:
+        if verbose:
+            print(f"Failed to remove metadata: {e}")
+        return False
+
+def crop_pdf(input_pdf: str,
+             output_pdf: str,
+             global_margins: Optional[dict[str, float]] = None,
+             page_margins: Optional[dict[int, Dict[str, float]]] = None,
+             verbose: bool = True) -> bool:
+    """
+    Crops the pages of a PDF based on the given (individual/global) margins and saves the result to a new PDF file.
+
+    Args:
+        input_pdf (str): The file path of the PDF to be cropped.
+        output_pdf (str): The file path where the cropped PDF should be saved.
+        global_margins (Optional[Dict[str, float]]): A dictionary containing 'left', 'right', 'top', and 'bottom' margins in points
+                                                     to be applied globally to all pages if no individual margins are specified.
+        page_margins (Optional[Dict[int, Dict[str, float]]]): A dictionary where keys are page indices (starting from 1) and values are
+                                                             dictionaries specifying 'left', 'right', 'top', and 'bottom' margins in points
+                                                             for individual pages. These margins will override global margins for specified pages.
+        verbose (bool): If True, prints success or failure messages. Defaults to True.
+
+    Returns:
+        bool: True if the PDF is successfully saved, False otherwise.
+    """
+    
+    try:
+        pdf_reader = PdfReader(input_pdf)
+        pdf_writer = PdfWriter()
+
+        # Initialize global and page margins as empty dictionaries if not provided
+        global_margins = global_margins or {}
+        page_margins = page_margins or {}
+
+        num_pages = len(pdf_reader.pages)
+
+        for page_num in range(num_pages):
+            page = pdf_reader.pages[page_num]
+
+            # Default crop box is the media box
+            crop_box = page.mediabox
+
+            # Determine margins to apply
+            # Start with global margins and override with page-specific margins if provided
+            margins = page_margins.get(page_num + 1, global_margins)
+
+            if margins:
+                left = margins.get('left', 0)
+                right = margins.get('right', 0)
+                top = margins.get('top', 0)
+                bottom = margins.get('bottom', 0)
+
+                # Adjust the crop box based on the margins
+                new_lower_left = (crop_box.lower_left[0] + left, crop_box.lower_left[1] + bottom)
+                new_upper_right = (crop_box.upper_right[0] - right, crop_box.upper_right[1] - top)
+
+                # Ensure the new coordinates are valid
+                if new_upper_right[0] > new_lower_left[0] and new_upper_right[1] > new_lower_left[1]:
+                    page.cropbox.lower_left = new_lower_left
+                    page.cropbox.upper_right = new_upper_right
+                else:
+                    raise ValueError(f"Invalid crop box dimensions on page {page_num + 1}. Please check the margins.")
+
+            # Add the modified page to the writer
+            pdf_writer.add_page(page)
+
+        # Write the cropped PDF to the output file
+        with open(output_pdf, 'wb') as out_file:
+            pdf_writer.write(out_file)
+
+        if verbose:
+            print(f"PDF cropped and saved successfully to '{output_pdf}'.")
+        return True
+
+    except Exception as e:
+        if verbose:
+            print(f"An error occurred while cropping the PDF: {e}")
+        return False
+
+def redact_strings(input_pdf_path: str,
+                   output_pdf_path: str,
+                   strings_to_anonymize: List[str],
+                   overlay_color: Union[str, Tuple[int, int, int]] = (0, 0, 0),
+                   match_whole_word: bool = True,
+                   verbose: bool = True) -> bool:
+    """
+    Anonymize and rasterize specified strings (words/substrings) in a PDF by redacting them with a specified overlay color.
+
+    Args:
+        input_pdf_path (str): The path to the input PDF file where words will be anonymized.
+        output_pdf_path (str): The path where the output PDF file with redactions will be saved.
+        strings_to_anonymize (List[str]): A list of words or phrases to be anonymized in the PDF.
+        overlay_color (Union[str, Tuple[int, int, int]]): The color to use for redaction, in RGB, hex, or human-readable color name format.
+        match_whole_word (bool): If True, only exact word matches will be anonymized. Defaults to True.
+        verbose (bool): If True, prints a success message if the operation is successful.
+
+    Returns:
+        bool: True if the PDF was saved successfully with the redactions, False otherwise.
+    """
+
+    try:
+        # Convert overlay color to normalized RGB tuple (0 to 1 range)
+        rgb_color = convert_to_rgb(overlay_color)
+
+        # Open the PDF document
+        pdf_document = fitz.open(input_pdf_path)
+
+        for page_num in range(pdf_document.page_count):
+            page = pdf_document.load_page(page_num)
+
+            for word in strings_to_anonymize:
+                # Search for the string (word/substring)
+                text_instances = page.search_for(word)
+                final_instances = []
+
+                if match_whole_word:
+                    for inst in text_instances:
+                        # Extract text around the instance to check for whole word match
+                        rect = fitz.Rect(inst)
+                        extracted_text = page.get_text("text", clip=rect)
+
+                        # Check if the found text is exactly the word
+                        if extracted_text.strip() == word:
+                            final_instances.append(inst)
+                else:
+                    final_instances = text_instances
+
+                # Redact the text instances
+                for inst in final_instances:
+                    rect = fitz.Rect(inst)
+                    # Add the redaction annotation with the RGB color (normalized float tuple)
+                    page.add_redact_annot(rect, fill=rgb_color)
+
+            # Apply all redactions
+            page.apply_redactions()
+
+        # Save the modified PDF
+        pdf_document.save(output_pdf_path)
+        pdf_document.close()
+
+        if verbose:
+            print(f"Redacted PDF saved to '{output_pdf_path}'.")
+        return True
+
+    except Exception as e:
+        if verbose:
+            print(f"An error occurred: {e}")
+        return False
+
 def enable_text_copy(input_pdf_path: str, output_pdf_path: str, verbose: bool = True) -> bool:
     """
     Removes restrictions on a PDF that prevent text from being copied.
@@ -520,6 +681,7 @@ def make_pdf_read_only(input_pdf_path: str, output_pdf_path: str, verbose: bool 
     Returns:
         bool: True if the PDF was saved successfully, False otherwise.
     """
+    
     try:
         reader = PdfReader(input_pdf_path)
         writer = PdfWriter()
@@ -552,3 +714,4 @@ def make_pdf_read_only(input_pdf_path: str, output_pdf_path: str, verbose: bool 
         if verbose:
             print(f"An error occurred: {e}")
         return False
+
