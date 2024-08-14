@@ -41,9 +41,6 @@ class TestCore(unittest.TestCase):
         strings_to_anonymize = ["Python", "programming", "release"]
         overlay_color = (0, 0, 0)
         success = pdf_essentials.redact_strings(input_pdf, output_pdf, strings_to_anonymize, overlay_color, match_whole_word=False)
-        text = ''        
-        with fitz.open(output_pdf) as doc:
-            for page in doc:
-                text+= page.get_text()            
+        text = pdf_essentials.get_text(output_pdf)
         assert (success and "Python" not in text and "programming" not in text and "release" not in text)
 

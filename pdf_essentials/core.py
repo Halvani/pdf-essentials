@@ -28,6 +28,13 @@ class PageNumberPosition(Enum):
     Right = auto()
     Center = auto()
 
+def get_text(input_pdf: str) -> str:
+    text = ''
+    with fitz.open(input_pdf) as doc:
+        for page in doc:
+            text+= page.get_text()
+    return text
+
 def add_page_numbers(input_pdf_path: str,
                      output_pdf_path: str,
                      margin_x: int = 50,
