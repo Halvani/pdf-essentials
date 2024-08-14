@@ -6,7 +6,6 @@ from typing import Union, Optional, List, Dict, Tuple
 
 import fitz  # PyMuPDF
 import pikepdf
-import ghostscript
 from PyPDF2 import PdfReader, PdfWriter, PdfMerger
 from PyPDF2.generic import NameObject, NumberObject
 from PyPDF2.errors import PdfReadError
@@ -847,6 +846,8 @@ def convert_to_pdfa(input_pdf: str, output_pdf: str, verbose: bool = True) -> bo
     Returns:
         bool: True if the PDF is successfully processed, False otherwise.
     """
+    
+    import ghostscript
     
     try:
         # Ghostscript command to convert PDF to PDF/A
