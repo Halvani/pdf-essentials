@@ -3,8 +3,6 @@ import sys
 import inspect
 import unittest
 import pytest
-import fitz
-
 
 # Import the module from the parent directory
 currentdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
