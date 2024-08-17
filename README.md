@@ -32,6 +32,8 @@ PDF-Essentials offers both standard and advanced functions for processing PDF fi
 
 - **Merging**: merge a list of PDF files into a single PDF file in the specified order
 
+- **Insertion**: insert entire PDFs, specific page ranges, or exact pages from multiple PDF files into a target PDF at specified positions
+
 - **Deletion**: delete specified pages from a PDF file
 
 - **Rotation**: rotate pages in a PDF file based on global or page-wise rotation setting(s)

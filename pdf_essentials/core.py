@@ -339,6 +339,120 @@ def delete_pdf_pages(input_pdf: str, output_pdf: str, page_numbers: List[int], v
             print(f"Unexpected error occurred: {e}")
         return False
 
+def insert_pdf_into_pdf(
+    input_pdf_path: str,
+    output_pdf_path: str,
+    inserts: Dict[int, Union[str, Tuple[str, Optional[int], Optional[int]], Tuple[str, int]]],
+    verbose: Optional[bool] = True) -> bool:
+    """
+    Inserts pages from specified PDFs into an existing PDF at given positions and saves the result to a new file.
+
+    This function allows you to insert entire PDFs, specific page ranges, or exact pages from multiple PDF files 
+    into a target PDF at specified positions. The indices provided in the `inserts` dictionary are adjusted 
+    dynamically to ensure that each insertion occurs at the correct position, even as the document grows with each insertion.
+
+    Args:
+        input_pdf_path (str): 
+            Path to the input PDF file where other PDFs will be inserted.
+        
+        output_pdf_path (str): 
+            Path to save the output PDF file that includes the inserted PDFs.
+        
+        inserts (Dict[int, Union[str, Tuple[str, Optional[int], Optional[int]], Tuple[str, int]]]): 
+            A dictionary where keys are the target page indices (starting from 1) in the input PDF, and values 
+            specify the PDFs to insert. The value can be:
+            - A string representing the path to the PDF to be inserted. The entire PDF will be inserted.
+            - A tuple containing:
+                - A string (path to the PDF).
+                - An optional start page index in the PDF to be inserted (starting from 1).
+                - An optional end page index in the PDF to be inserted (inclusive, starting from 1).
+            - A tuple containing:
+                - A string (path to the PDF).
+                - An exact page index in the PDF to be inserted (starting from 1).
+        
+        verbose (Optional[bool]): 
+            If True, prints success or failure messages. Default is True.
+
+    Returns:
+        bool: 
+            True if the PDF was saved successfully, False otherwise.
+
+    Example:
+        result = insert_pdf_into_pdf(
+            input_pdf_path="main_document.pdf", 
+            output_pdf_path="final_document.pdf", 
+            inserts={
+                1: "insert1.pdf",                           # Insert all pages of insert1.pdf at position 1
+                3: ("insert2.pdf", 2, 5),                    # Insert pages 2 to 5 of insert2.pdf at position 3
+                5: ("insert3.pdf", 2),                       # Insert only page 2 of insert3.pdf at position 5
+                7: ("insert4.pdf", 4, None)                  # Insert from page 4 to the last page of insert4.pdf at position 7
+            },
+            verbose=True
+        )
+        
+        if result:
+            print("PDF modification was successful.")
+        else:
+            print("PDF modification failed.")
+    """
+    
+    try:
+        # Open the main PDF document
+        doc = fitz.open(input_pdf_path)
+        
+        # Sort the insert positions in ascending order
+        sorted_inserts = sorted(inserts.items())
+        
+        # Track the number of pages inserted so far
+        pages_inserted = 0
+        
+        for position, insert_info in sorted_inserts:
+            # Adjust the insertion position by the number of pages inserted so far
+            adjusted_position = position - 1 + pages_inserted
+            
+            if isinstance(insert_info, str):
+                # If the value is a string, it's just the path to the PDF to be inserted
+                insert_pdf_path = insert_info
+                insert_start = None
+                insert_end = None
+            elif isinstance(insert_info, tuple) and len(insert_info) == 2 and isinstance(insert_info[1], int):
+                # If the value is a tuple with exactly two elements and the second element is an int
+                insert_pdf_path = insert_info[0]
+                insert_start = insert_info[1] - 1  # Convert to 0-based index
+                insert_end = insert_start  # Same page for exact index
+            else:
+                # If the value is a tuple with a range
+                insert_pdf_path, insert_start, insert_end = insert_info
+                insert_start = (insert_start - 1) if insert_start else 0
+                insert_end = (insert_end - 1) if insert_end else fitz.open(insert_pdf_path).page_count - 1
+            
+            # Open the PDF to be inserted
+            insert_doc = fitz.open(insert_pdf_path)
+            
+            # Insert the specified page range from the insert PDF into the main document
+            doc.insert_pdf(insert_doc, from_page=insert_start, to_page=insert_end, start_at=adjusted_position)
+            
+            # Close the inserted PDF document
+            insert_doc.close()
+            
+            # Update the number of pages inserted so far
+            pages_inserted += insert_end - insert_start + 1
+        
+        # Save the resulting PDF to a new file
+        doc.save(output_pdf_path)
+        doc.close()
+        
+        # If verbose is True, print success message
+        if verbose:
+            print(f"Success: The PDF has been saved to '{output_pdf_path}'.")
+        return True
+
+    except Exception as e:
+        # If verbose is True, print failure message
+        if verbose:
+            print(f"Failed to save the PDF: {e}")
+        return False
+    
 def rotate_pages(input_pdf_path: str,
                  output_pdf_path: str,
                  global_rotation: Optional[int] = None,
