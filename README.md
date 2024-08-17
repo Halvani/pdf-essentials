@@ -5,11 +5,20 @@
 </div>
 
 # PDF-Essentials
-An easy-to-use Python library for modifying, manipulating and processing PDF files. 
+An easy-to-use Python library for annotating, manipulating and processing PDF files.
 
 
 ## Description
-PDF-Essentials was born out of the idea to bundle both common and advanced PDF manipulation and processing functions into a single library. It builds on pikepdf, fitz, PyPDF2 and reportlab and allows you to perform a variety of PDF manipulation tasks such as redacting, extracting, deleting, splitting, cropping and others without going into the details required when using low-level PDF libraries. 
+PDF-Essentials was born out of the idea to bundle both common and advanced PDF manipulation and processing functions into a single library. It builds on [pikepdf](https://github.com/pikepdf/pikepdf), [fitz](https://github.com/pymupdf/PyMuPDF), [PyPDF2/pypdf](https://github.com/py-pdf/pypdf) and [reportlab](https://pypi.org/project/reportlab/) and allows you to perform a variety of PDF editing tasks, including redacting, annotating, extracting, cropping, deleting, splitting and others, without having to deal with the details required when using low-level PDF libraries.
+
+
+## Installation
+The easiest way to install PDF-Essentials is to use pip, where you can choose between PyPI and this repository: 
+
+- ```pip install pdf-essentials```
+- ```pip install git+https://github.com/Halvani/pdf-essentials.git```
+
+The latter will pull and install the latest commit from this repository as well as the required Python dependencies. Note that the repo is updated regulary, while PyPi-packages are less frequently released (primarily after mayor bugfixing, refactoring, etc.).
 
 
 ## Features
@@ -41,12 +50,15 @@ PDF-Essentials offers both standard and advanced functions for processing PDF fi
 
 - **PDF/A Conversion/Validation**: convert PDF to PDF/A format (requires [ghostscript](https://ghostscript.com/releases/gsdnld.html)) or validate if a given PDF complies with PDF/A
 
+- **Highlighting**: highlights occurrences of substrings, whole words or regex patterns in a PDF file and adds comments to the highlighted text along with a background color
+
+
 ## Limitations / Design Considerations:
 PDF-Essentials comes with several limitations:
 
 - *Form field protection* does not currently work for all tested PDFs and is still being investigated. Therefore, you do not need to open an issue in this regard.
 
-- Currently, all input/output operations are based on the file system. In the future, it is planned to integrate an additional in-memory mechanism so that the functions can operate directly on byte streams, which in turn will enable reasonable pipelining. However, this mechanism is a little tricky and requires a well thought-out design, which again demands time. So please be patient :-) 
+- Currently, all input/output operations are based on the file system. In the future, it is planned to integrate an additional in-memory mechanism so that the functions can operate directly on byte streams, which in turn will enable reasonable pipelining. However, this mechanism is a little tricky and requires a well thought-out design, which again demands time. So please be patient 🙏
 
 
 ## Disclaimer

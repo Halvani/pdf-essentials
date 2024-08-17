@@ -1,5 +1,6 @@
 import os
 import io
+import re
 from pathlib import Path
 from enum import Enum, auto
 from typing import Union, Optional, List, Dict, Tuple
@@ -14,6 +15,41 @@ from reportlab.lib.pagesizes import letter
 
 from .utils import convert_to_rgb
 
+
+# Define a custom type for the color, used in: highlight_text_in_pdf(..)
+ColorType = Union[Tuple[int, int, int], str]
+
+# Define the Enum for search types, used in: highlight_text_in_pdf(..)
+class SearchType(Enum):
+    """
+    Enum representing the type of search to be performed on the PDF text.
+
+    Attributes:
+        SUBSTRING (str): Represents a search for a substring. Matches any occurrence of the search pattern, regardless of its position within a word or phrase.
+        WHOLE_WORD (str): Represents a search for a whole word. Only matches occurrences where the search pattern is a standalone word, not part of another word.
+        REGEX (str): Represents a search based on a regular expression pattern. Allows for complex search patterns and matches using regex syntax.
+    """
+    SUBSTRING = "substring"
+    WHOLE_WORD = "whole_word"
+    REGEX = "regex"
+
+# Define the Enum for annotation types, used in: highlight_text_in_pdf(..)
+class AnnotationType(Enum):
+    """
+    Enum representing the type of annotation to be applied to the highlighted text in the PDF.
+
+    Attributes:
+        HIGHLIGHT (str): Represents a highlight annotation. The text will be highlighted with a transparent overlay, typical for marking text.
+        SQUIGGLY (str): Represents a squiggly underline annotation. The text will have a squiggly line underneath, often used to indicate uncertain or questioned content.
+        UNDERLINE (str): Represents an underline annotation. The text will be underlined with a straight line, commonly used for emphasis.
+        STRIKEOUT (str): Represents a strikeout annotation. The text will be struck through with a line, usually indicating deletion or removal.
+    """
+    HIGHLIGHT = "Highlight"
+    SQUIGGLY = "Squiggly"
+    UNDERLINE = "Underline"
+    STRIKEOUT = "StrikeOut"
+
+# Define the Enum for page_number_positions, used in: add_page_numbers(..)
 class PageNumberPosition(Enum):
     """
     Enum representing the position where the page number will be placed on each page.
@@ -875,3 +911,103 @@ def convert_to_pdfa(input_pdf: str, output_pdf: str, verbose: bool = True) -> bo
         if verbose:
             print(f"An error occurred while converting to PDF/A: {e}")
         return False
+
+def highlight_text_in_pdf(input_pdf_path: str,
+                          output_pdf_path: str,
+                          search_specs: List[Tuple[SearchType, Union[str, re.Pattern], str]],
+                          color: Optional[ColorType] = None,
+                          annotation_type: AnnotationType = AnnotationType.HIGHLIGHT,  # Default to Highlight
+                          verbose: bool = True) -> bool:
+    """
+    Highlights occurrences of specified strings or regex patterns in a PDF file, adds comments to the highlighted text with a background color, and saves the result to a new PDF.
+
+    Args:
+        input_pdf_path (str): Path to the input PDF file.
+        output_pdf_path (str): Path to save the output PDF file with highlights.
+        search_specs (List[Tuple[SearchType, Union[str, re.Pattern], str]]): A list of tuples, where each tuple contains:
+            - search_type (SearchType): The type of search (substring, whole word, regex).
+            - search_pattern (Union[str, re.Pattern]): The string, phrase, or regex pattern to search for.
+            - comment (str): The comment to add to each highlighted instance.
+        color (Optional[ColorType]): Background color for the comment. Can be an RGB tuple, HTML color code, or a color name. Default is None (no background color).
+        annotation_type (AnnotationType): The type of annotation to use (Highlight, Squiggly, Underline, StrikeOut). Default is Highlight.
+        verbose (bool): If True, prints success or failure messages. Default is True.
+
+    Returns:
+        bool: True if the PDF was processed and saved successfully, False otherwise.
+    """
+    
+    try:
+        # Open the PDF
+        doc = fitz.open(input_pdf_path)
+        
+        # Define the color for the comment background
+        if color:
+            if isinstance(color, str):
+                comment_bg_color = fitz.utils.getColor(color)
+            else:
+                comment_bg_color = color
+        else:
+            comment_bg_color = None
+        
+        # Iterate over all the pages
+        for page_num in range(len(doc)):
+            page = doc.load_page(page_num)
+            
+            for search_type, search_pattern, comment in search_specs:
+
+                if search_type == SearchType.SUBSTRING:
+                    text_instances = page.search_for(search_pattern)
+                elif search_type == SearchType.WHOLE_WORD:
+                    # Use a regex to match whole words
+                    word_regex = rf'\b{re.escape(search_pattern)}\b'
+                    text_instances = []
+                    page_text = page.get_text("text")
+                    for match in re.finditer(word_regex, page_text):
+                        match_text = match.group(0)
+                        instance_positions = page.search_for(match_text)
+                        text_instances.extend([instance for instance in instance_positions if match_text == page.get_textbox(instance).strip()])
+                elif search_type == SearchType.REGEX:
+                    # Extract the text of the page
+                    page_text = page.get_text("text")
+                    # Use re.finditer to find all matches
+                    text_instances = []
+                    for match in re.finditer(search_pattern, page_text):
+                        match_text = match.group(0)
+                        # Find positions of the match_text in the page
+                        instance_positions = page.search_for(match_text)
+                        text_instances.extend(instance_positions)
+
+                # Apply the chosen annotation type
+                for instance in text_instances:
+                    if annotation_type == AnnotationType.HIGHLIGHT:
+                        annot = page.add_highlight_annot(instance)
+                    elif annotation_type == AnnotationType.SQUIGGLY:
+                        annot = page.add_squiggly_annot(instance)
+                    elif annotation_type == AnnotationType.UNDERLINE:
+                        annot = page.add_underline_annot(instance)
+                    elif annotation_type == AnnotationType.STRIKEOUT:
+                        annot = page.add_strikeout_annot(instance)
+                    else:
+                        raise ValueError(f"Unsupported annotation type: {annotation_type}")
+                    
+                    # Add a comment to the annotation
+                    if annot:
+                        annot.set_popup(page.rect.tl)
+                        annot.set_info({"title": "Comment", "content": comment})
+                        if comment_bg_color:
+                            annot.set_colors(stroke=comment_bg_color)  # Avoid setting fill for Highlight
+                        annot.update()
+        
+        # Save the modified PDF to a new file
+        doc.save(output_pdf_path)
+        doc.close()
+
+        if verbose:
+            print(f"Success: The PDF has been saved to '{output_pdf_path}'.")
+        return True
+    
+    except Exception as e:
+        if verbose:
+            print(f"Failed to process the PDF: {e}")
+        return False
+    

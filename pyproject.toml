@@ -4,9 +4,9 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pdf-essentials"
-version = "0.0.2"
+version = "0.0.3"
 authors = [{name="Oren Halvani"}]
-description = "An easy-to-use Python library for modifying, manipulating and processing PDF files"
+description = "An easy-to-use Python library for annotating, manipulating and processing PDF files"
 readme = "README.md"
 requires-python = ">=3.9"
 
@@ -16,7 +16,9 @@ classifiers = [
 	"License :: OSI Approved :: MIT License",
 	"Operating System :: OS Independent", 
 	"Programming Language :: Python :: 3.9",
-	"Programming Language :: Python :: 3.10"
+	"Programming Language :: Python :: 3.10",
+	"Programming Language :: Python :: 3.11",
+	"Programming Language :: Python :: 3.12"
 ]
 
 dependencies = [
@@ -29,7 +31,7 @@ dependencies = [
 "webcolors==1.13"
 ]
 
-keywords = ["pdf-converter", "pdf-manipulation", "pdf-merger", "pdf-crop-margins", "pdf-manipulation-utitilies", "pdf-redaction"]
+keywords = ["pdf-converter", "pdf-manipulation", "pdf-merger", "pdf-crop-margins", "pdf-manipulation-utitilies", "pdf-redaction", "pdf-highlighting", "pdf-annotation"]
 
 [project.urls]
 "Homepage" = "https://github.com/Halvani/pdf-essentials"
